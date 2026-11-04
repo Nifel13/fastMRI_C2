@@ -43,6 +43,7 @@ class VarNetModule(MriModule):
         lr_step_size: int = 40,
         lr_gamma: float = 0.1,
         weight_decay: float = 0.0,
+        coil_attention=False,
         **kwargs,
     ):
         """
@@ -81,6 +82,7 @@ class VarNetModule(MriModule):
         self.lr_step_size = lr_step_size
         self.lr_gamma = lr_gamma
         self.weight_decay = weight_decay
+        self.coil_attention = coil_attention
 
         self.varnet = VarNet(
             num_cascades=self.num_cascades,
@@ -88,6 +90,7 @@ class VarNetModule(MriModule):
             sens_pools=self.sens_pools,
             chans=self.chans,
             pools=self.pools,
+            coil_attention=self.coil_attention,
         )
 
         self.loss = fastmri.SSIMLoss()
@@ -215,6 +218,13 @@ class VarNetModule(MriModule):
             default=0.0,
             type=float,
             help="Strength of weight decay regularization",
+        )
+        
+        parser.add_argument(
+            "--coil_attention",
+            default=False,
+            action="store_true",
+            help="Whether to use coil attention in the sensitivity model",
         )
 
         return parser

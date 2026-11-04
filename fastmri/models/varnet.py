@@ -14,6 +14,7 @@ import torch.nn.functional as F
 
 import fastmri
 from fastmri.data import transforms
+from .coil_attention import CoilAttention
 
 from .unet import Unet
 
@@ -143,6 +144,7 @@ class SensitivityModel(nn.Module):
         out_chans: int = 2,
         drop_prob: float = 0.0,
         mask_center: bool = True,
+        coil_attention=False,
     ):
         """
         Args:
@@ -156,6 +158,7 @@ class SensitivityModel(nn.Module):
         """
         super().__init__()
         self.mask_center = mask_center
+        self.coil_attn = CoilAttention() if coil_attention else None
         self.norm_unet = NormUnet(
             chans,
             num_pools,
@@ -216,11 +219,11 @@ class SensitivityModel(nn.Module):
 
         # convert to image space
         images, batches = self.chans_to_batch_dim(fastmri.ifft2c(masked_kspace))
-
-        # estimate sensitivities
-        return self.divide_root_sum_of_squares(
-            self.batch_chans_to_chan_dim(self.norm_unet(images), batches)
-        )
+        x = self.batch_chans_to_chan_dim(self.norm_unet(images), batches)
+        
+        if self.coil_attn is not None:
+            x = self.coil_attn(x)
+        return self.divide_root_sum_of_squares(x)
 
 
 class VarNet(nn.Module):
@@ -239,6 +242,7 @@ class VarNet(nn.Module):
         chans: int = 18,
         pools: int = 4,
         mask_center: bool = True,
+        coil_attention: bool = False,
     ):
         """
         Args:
@@ -259,6 +263,7 @@ class VarNet(nn.Module):
             chans=sens_chans,
             num_pools=sens_pools,
             mask_center=mask_center,
+            coil_attention=coil_attention,
         )
         self.cascades = nn.ModuleList(
             [VarNetBlock(NormUnet(chans, pools)) for _ in range(num_cascades)]

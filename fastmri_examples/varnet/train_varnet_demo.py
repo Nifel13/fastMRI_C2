@@ -59,6 +59,7 @@ def cli_main(args):
         lr_step_size=args.lr_step_size,
         lr_gamma=args.lr_gamma,
         weight_decay=args.weight_decay,
+        coil_attention=args.coil_attention,
     )
 
     # ------------
@@ -82,8 +83,8 @@ def build_args():
 
     # basic args
     path_config = pathlib.Path("../../fastmri_dirs.yaml")
-    backend = "ddp"
-    num_gpus = 2 if backend == "ddp" else 1
+    backend = None
+    num_gpus = 2     if backend == "ddp" else 1
     batch_size = 1
 
     # set defaults based on optional directory config
@@ -91,6 +92,7 @@ def build_args():
     default_root_dir = fetch_dir("log_path", path_config) / "varnet" / "varnet_demo"
 
     # client arguments
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--mode",
         default="train",
@@ -153,12 +155,13 @@ def build_args():
         replace_sampler_ddp=False,  # this is necessary for volume dispatch during val
         strategy=backend,  # what distributed version to use
         seed=42,  # random seed
-        deterministic=True,  # makes things slower, but deterministic
+        deterministic=False,  # makes things slower, but deterministic
         default_root_dir=default_root_dir,  # directory for logs and checkpoints
         max_epochs=50,  # max number of epochs
     )
 
     args = parser.parse_args()
+    args.default_root_dir = pathlib.Path(args.default_root_dir)
 
     # configure checkpointing in checkpoint_dir
     checkpoint_dir = args.default_root_dir / "checkpoints"

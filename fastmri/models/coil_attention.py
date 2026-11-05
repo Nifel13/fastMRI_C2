@@ -11,7 +11,8 @@ class CoilAttention(nn.Module):
         self.norm2 = nn.LayerNorm(dim)
         self.mlp = nn.Sequential(nn.Linear(dim, 2 * dim), nn.GELU(), nn.Linear(2 * dim, dim))
         self.out = nn.Conv2d(dim, 2, 1)
-        nn.init.zeros_(self.out.weight); nn.init.zeros_(self.out.bias)  # starts as identity
+        nn.init.normal_(self.out.weight, std=1e-3)
+        nn.init.zeros_(self.out.bias)
 
     def forward(self, x):
         B, C, H, W, _ = x.shape

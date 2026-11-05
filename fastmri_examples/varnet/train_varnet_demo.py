@@ -65,13 +65,31 @@ def cli_main(args):
     # ------------
     # trainer
     # ------------
-    trainer = pl.Trainer.from_argparse_args(args)
+    if hasattr(pl.Trainer, "from_argparse_args"):
+        trainer = pl.Trainer.from_argparse_args(args)
+    else:
+        trainer = pl.Trainer(
+            accelerator=args.accelerator,
+            devices=args.devices,
+            strategy=args.strategy or "auto",
+            deterministic=args.deterministic,
+            default_root_dir=args.default_root_dir,
+            max_epochs=args.max_epochs,
+            callbacks=args.callbacks,
+        )
 
     # ------------
     # run
     # ------------
     if args.mode == "train":
-        trainer.fit(model, datamodule=data_module)
+        if hasattr(pl.Trainer, "from_argparse_args"):
+            trainer.fit(model, datamodule=data_module)
+        else:
+            trainer.fit(
+                model,
+                datamodule=data_module,
+                ckpt_path=args.resume_from_checkpoint,
+            )
     elif args.mode == "test":
         trainer.test(model, datamodule=data_module)
     else:
@@ -149,16 +167,29 @@ def build_args():
     )
 
     # trainer config
-    parser = pl.Trainer.add_argparse_args(parser)
-    parser.set_defaults(
-        gpus=num_gpus,  # number of gpus to use
-        replace_sampler_ddp=False,  # this is necessary for volume dispatch during val
-        strategy=backend,  # what distributed version to use
-        seed=42,  # random seed
-        deterministic=False,  # makes things slower, but deterministic
-        default_root_dir=default_root_dir,  # directory for logs and checkpoints
-        max_epochs=50,  # max number of epochs
-    )
+    if hasattr(pl.Trainer, "add_argparse_args"):
+        parser = pl.Trainer.add_argparse_args(parser)
+        parser.set_defaults(
+            gpus=num_gpus,  # number of gpus to use
+            replace_sampler_ddp=False,  # this is necessary for volume dispatch during val
+            strategy=backend,  # what distributed version to use
+            seed=42,  # random seed
+            deterministic=False,  # makes things slower, but deterministic
+            default_root_dir=default_root_dir,  # directory for logs and checkpoints
+            max_epochs=50,  # max number of epochs
+        )
+    else:
+        parser.add_argument("--accelerator", default="auto")
+        parser.add_argument("--devices", default=1, type=int)
+        parser.add_argument("--strategy", default=backend)
+        parser.add_argument("--deterministic", action="store_true")
+        parser.add_argument(
+            "--default_root_dir",
+            type=pathlib.Path,
+            default=default_root_dir,
+        )
+        parser.add_argument("--max_epochs", default=50, type=int)
+        parser.set_defaults(seed=42, resume_from_checkpoint=None)
 
     args = parser.parse_args()
     args.default_root_dir = pathlib.Path(args.default_root_dir)

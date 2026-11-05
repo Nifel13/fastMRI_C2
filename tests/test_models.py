@@ -10,6 +10,7 @@ import torch
 
 from fastmri.data import transforms
 from fastmri.data.subsample import RandomMaskFunc
+from fastmri.models.coil_attention import CoilAttention
 from fastmri.models import Unet, VarNet
 
 from .conftest import create_input
@@ -122,3 +123,17 @@ def test_varnet_scripting():
     model = VarNet(num_cascades=4, pools=2, chans=8, sens_pools=2, sens_chans=4)
     scr = torch.jit.script(model)
     assert scr is not None
+
+
+def test_coil_attention_shape_and_gradient():
+    model = CoilAttention()
+    x = torch.randn(1, 3, 17, 19, 2, requires_grad=True)
+
+    output = model(x)
+    output.sum().backward()
+
+    assert output.shape == x.shape
+    assert model.embed.weight.grad is not None
+    assert model.embed.weight.grad.abs().sum() > 0
+    assert model.attn.in_proj_weight.grad is not None
+    assert model.attn.in_proj_weight.grad.abs().sum() > 0

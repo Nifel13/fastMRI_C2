@@ -122,3 +122,25 @@ def test_varnet_scripting():
     model = VarNet(num_cascades=4, pools=2, chans=8, sens_pools=2, sens_chans=4)
     scr = torch.jit.script(model)
     assert scr is not None
+
+
+@pytest.mark.parametrize(
+    "coil_attention_placement", ["none", "output", "bottleneck"]
+)
+def test_varnet_coil_attention_placement(coil_attention_placement):
+    shape = [1, 3, 32, 16, 2]
+    mask_func = RandomMaskFunc([0.08], [4])
+    x = create_input(shape)
+    masked_kspace, mask, _ = transforms.apply_mask(x, mask_func, seed=123)
+    varnet = VarNet(
+        num_cascades=1,
+        sens_chans=4,
+        sens_pools=2,
+        chans=4,
+        pools=2,
+        coil_attention_placement=coil_attention_placement,
+    )
+
+    output = varnet(masked_kspace, mask.byte())
+
+    assert output.shape[1:] == x.shape[2:4]

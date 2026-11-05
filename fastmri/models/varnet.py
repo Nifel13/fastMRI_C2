@@ -14,8 +14,8 @@ import torch.nn.functional as F
 
 import fastmri
 from fastmri.data import transforms
-from .coil_attention import CoilAttention
 
+from .coil_attention import CoilAttention
 from .unet import Unet
 
 
@@ -35,6 +35,8 @@ class NormUnet(nn.Module):
         in_chans: int = 2,
         out_chans: int = 2,
         drop_prob: float = 0.0,
+        bottleneck_coil_attention: bool = False,
+        attention_heads: int = 4,
     ):
         """
         Args:
@@ -43,6 +45,8 @@ class NormUnet(nn.Module):
             in_chans: Number of channels in the input to the U-Net model.
             out_chans: Number of channels in the output to the U-Net model.
             drop_prob: Dropout probability.
+            bottleneck_coil_attention: Whether to mix coils at the bottleneck.
+            attention_heads: Number of bottleneck coil-attention heads.
         """
         super().__init__()
 
@@ -52,6 +56,8 @@ class NormUnet(nn.Module):
             chans=chans,
             num_pool_layers=num_pools,
             drop_prob=drop_prob,
+            bottleneck_coil_attention=bottleneck_coil_attention,
+            attention_heads=attention_heads,
         )
 
     def complex_to_chan_dim(self, x: torch.Tensor) -> torch.Tensor:
@@ -108,7 +114,9 @@ class NormUnet(nn.Module):
     ) -> torch.Tensor:
         return x[..., h_pad[0] : h_mult - h_pad[1], w_pad[0] : w_mult - w_pad[1]]
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, coil_batch_size: Optional[int] = None
+    ) -> torch.Tensor:
         if not x.shape[-1] == 2:
             raise ValueError("Last dimension must be 2 for complex.")
 
@@ -117,7 +125,7 @@ class NormUnet(nn.Module):
         x, mean, std = self.norm(x)
         x, pad_sizes = self.pad(x)
 
-        x = self.unet(x)
+        x = self.unet(x, coil_batch_size=coil_batch_size)
 
         # get shapes back and unnormalize
         x = self.unpad(x, *pad_sizes)
@@ -144,7 +152,7 @@ class SensitivityModel(nn.Module):
         out_chans: int = 2,
         drop_prob: float = 0.0,
         mask_center: bool = True,
-        coil_attention=False,
+        coil_attention_placement: str = "none",
     ):
         """
         Args:
@@ -155,16 +163,27 @@ class SensitivityModel(nn.Module):
             drop_prob: Dropout probability.
             mask_center: Whether to mask center of k-space for sensitivity map
                 calculation.
+            coil_attention_placement: Coil-attention location. One of ``none``,
+                ``output``, or ``bottleneck``.
         """
         super().__init__()
+        if coil_attention_placement not in ("none", "output", "bottleneck"):
+            raise ValueError(
+                "coil_attention_placement must be none, output, or bottleneck"
+            )
+
         self.mask_center = mask_center
-        self.coil_attn = CoilAttention() if coil_attention else None
+        self.coil_attention_placement = coil_attention_placement
+        self.coil_attn = (
+            CoilAttention() if coil_attention_placement == "output" else None
+        )
         self.norm_unet = NormUnet(
             chans,
             num_pools,
             in_chans=in_chans,
             out_chans=out_chans,
             drop_prob=drop_prob,
+            bottleneck_coil_attention=coil_attention_placement == "bottleneck",
         )
 
     def chans_to_batch_dim(self, x: torch.Tensor) -> Tuple[torch.Tensor, int]:
@@ -219,8 +238,9 @@ class SensitivityModel(nn.Module):
 
         # convert to image space
         images, batches = self.chans_to_batch_dim(fastmri.ifft2c(masked_kspace))
-        x = self.batch_chans_to_chan_dim(self.norm_unet(images), batches)
-        
+        estimates = self.norm_unet(images, coil_batch_size=batches)
+        x = self.batch_chans_to_chan_dim(estimates, batches)
+
         if self.coil_attn is not None:
             x = self.coil_attn(x)
         return self.divide_root_sum_of_squares(x)
@@ -242,7 +262,8 @@ class VarNet(nn.Module):
         chans: int = 18,
         pools: int = 4,
         mask_center: bool = True,
-        coil_attention: bool = False,
+        coil_attention_placement: str = "none",
+        coil_attention: Optional[bool] = None,
     ):
         """
         Args:
@@ -256,14 +277,25 @@ class VarNet(nn.Module):
                 U-Net.
             mask_center: Whether to mask center of k-space for sensitivity map
                 calculation.
+            coil_attention_placement: Coil-attention location. One of ``none``,
+                ``output``, or ``bottleneck``.
+            coil_attention: Backward-compatible alias. ``True`` selects output
+                attention.
         """
         super().__init__()
+        if coil_attention is not None:
+            if coil_attention and coil_attention_placement != "none":
+                raise ValueError(
+                    "Set coil_attention or coil_attention_placement, not both"
+                )
+            if coil_attention:
+                coil_attention_placement = "output"
 
         self.sens_net = SensitivityModel(
             chans=sens_chans,
             num_pools=sens_pools,
             mask_center=mask_center,
-            coil_attention=coil_attention,
+            coil_attention_placement=coil_attention_placement,
         )
         self.cascades = nn.ModuleList(
             [VarNetBlock(NormUnet(chans, pools)) for _ in range(num_cascades)]

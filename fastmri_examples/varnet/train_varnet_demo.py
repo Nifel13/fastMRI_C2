@@ -59,7 +59,7 @@ def cli_main(args):
         lr_step_size=args.lr_step_size,
         lr_gamma=args.lr_gamma,
         weight_decay=args.weight_decay,
-        coil_attention=args.coil_attention,
+        coil_attention_placement=args.coil_attention_placement,
     )
 
     # ------------
@@ -82,14 +82,20 @@ def build_args():
     parser = ArgumentParser()
 
     # basic args
-    path_config = pathlib.Path("../../fastmri_dirs.yaml")
+    project_root = pathlib.Path(__file__).resolve().parents[2]
+    path_config = project_root / "fastmri_dirs.yaml"
     backend = None
-    num_gpus = 2     if backend == "ddp" else 1
+    num_gpus = 2 if backend == "ddp" else 1
     batch_size = 1
 
     # set defaults based on optional directory config
-    data_path = fetch_dir("knee_path", path_config)
-    default_root_dir = fetch_dir("log_path", path_config) / "varnet" / "varnet_demo"
+    if path_config.is_file():
+        data_path = fetch_dir("brain_path", path_config)
+        log_path = fetch_dir("log_path", path_config)
+    else:
+        data_path = project_root / "data" / "brain"
+        log_path = project_root / "lightning_logs"
+    default_root_dir = log_path / "varnet" / "varnet_demo"
 
     # client arguments
     parser.add_argument("--seed", type=int, default=42)
@@ -161,6 +167,13 @@ def build_args():
     )
 
     args = parser.parse_args()
+    if args.coil_attention:
+        if args.coil_attention_placement != "none":
+            parser.error(
+                "--coil_attention cannot be combined with "
+                "--coil_attention_placement"
+            )
+        args.coil_attention_placement = "output"
     args.default_root_dir = pathlib.Path(args.default_root_dir)
 
     # configure checkpointing in checkpoint_dir

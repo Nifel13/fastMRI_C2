@@ -5,9 +5,13 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
 
+from typing import Optional
+
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+from .coil_attention import BottleneckCoilAttention
 
 
 class Unet(nn.Module):
@@ -27,6 +31,8 @@ class Unet(nn.Module):
         chans: int = 32,
         num_pool_layers: int = 4,
         drop_prob: float = 0.0,
+        bottleneck_coil_attention: bool = False,
+        attention_heads: int = 4,
     ):
         """
         Args:
@@ -35,6 +41,8 @@ class Unet(nn.Module):
             chans: Number of output channels of the first convolution layer.
             num_pool_layers: Number of down-sampling and up-sampling layers.
             drop_prob: Dropout probability.
+            bottleneck_coil_attention: Whether to mix coils at the bottleneck.
+            attention_heads: Number of bottleneck coil-attention heads.
         """
         super().__init__()
 
@@ -50,6 +58,11 @@ class Unet(nn.Module):
             self.down_sample_layers.append(ConvBlock(ch, ch * 2, drop_prob))
             ch *= 2
         self.conv = ConvBlock(ch, ch * 2, drop_prob)
+        self.bottleneck_coil_attention = (
+            BottleneckCoilAttention(ch * 2, heads=attention_heads)
+            if bottleneck_coil_attention
+            else None
+        )
 
         self.up_conv = nn.ModuleList()
         self.up_transpose_conv = nn.ModuleList()
@@ -66,10 +79,14 @@ class Unet(nn.Module):
             )
         )
 
-    def forward(self, image: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, image: torch.Tensor, coil_batch_size: Optional[int] = None
+    ) -> torch.Tensor:
         """
         Args:
             image: Input 4D tensor of shape `(N, in_chans, H, W)`.
+            coil_batch_size: Batch size before coils were folded into the batch
+                dimension. Required for bottleneck coil attention.
 
         Returns:
             Output tensor of shape `(N, out_chans, H, W)`.
@@ -84,6 +101,24 @@ class Unet(nn.Module):
             output = F.avg_pool2d(output, kernel_size=2, stride=2, padding=0)
 
         output = self.conv(output)
+
+        if self.bottleneck_coil_attention is not None:
+            if coil_batch_size is None:
+                raise ValueError(
+                    "coil_batch_size is required for bottleneck coil attention"
+                )
+
+            batch_coils, features, height, width = output.shape
+            if batch_coils % coil_batch_size != 0:
+                raise ValueError(
+                    "Folded coil batch must be divisible by coil_batch_size"
+                )
+            coils = batch_coils // coil_batch_size
+            output = output.reshape(
+                coil_batch_size, coils, features, height, width
+            )
+            output = self.bottleneck_coil_attention(output)
+            output = output.reshape(batch_coils, features, height, width)
 
         # apply up-sampling layers
         for transpose_conv, conv in zip(self.up_transpose_conv, self.up_conv):

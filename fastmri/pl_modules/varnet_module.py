@@ -6,6 +6,7 @@ LICENSE file in the root directory of this source tree.
 """
 
 from argparse import ArgumentParser
+from typing import Optional
 
 import torch
 
@@ -43,7 +44,8 @@ class VarNetModule(MriModule):
         lr_step_size: int = 40,
         lr_gamma: float = 0.1,
         weight_decay: float = 0.0,
-        coil_attention=False,
+        coil_attention_placement: str = "none",
+        coil_attention: Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -60,6 +62,10 @@ class VarNetModule(MriModule):
             lr_step_size: Learning rate step size.
             lr_gamma: Learning rate gamma decay.
             weight_decay: Parameter for penalizing weights norm.
+            coil_attention_placement: Coil-attention location. One of ``none``,
+                ``output``, or ``bottleneck``.
+            coil_attention: Backward-compatible alias. ``True`` selects output
+                attention.
             num_sense_lines: Number of low-frequency lines to use for sensitivity map
                 computation, must be even or `None`. Default `None` will automatically
                 compute the number from masks. Default behaviour may cause some slices to
@@ -71,6 +77,13 @@ class VarNetModule(MriModule):
                 simultaneously.
         """
         super().__init__(**kwargs)
+        if coil_attention is not None:
+            if coil_attention and coil_attention_placement != "none":
+                raise ValueError(
+                    "Set coil_attention or coil_attention_placement, not both"
+                )
+            if coil_attention:
+                coil_attention_placement = "output"
         self.save_hyperparameters()
 
         self.num_cascades = num_cascades
@@ -82,7 +95,7 @@ class VarNetModule(MriModule):
         self.lr_step_size = lr_step_size
         self.lr_gamma = lr_gamma
         self.weight_decay = weight_decay
-        self.coil_attention = coil_attention
+        self.coil_attention_placement = coil_attention_placement
 
         self.varnet = VarNet(
             num_cascades=self.num_cascades,
@@ -90,7 +103,7 @@ class VarNetModule(MriModule):
             sens_pools=self.sens_pools,
             chans=self.chans,
             pools=self.pools,
-            coil_attention=self.coil_attention,
+            coil_attention_placement=self.coil_attention_placement,
         )
 
         self.loss = fastmri.SSIMLoss()
@@ -219,12 +232,19 @@ class VarNetModule(MriModule):
             type=float,
             help="Strength of weight decay regularization",
         )
-        
+
+        parser.add_argument(
+            "--coil_attention_placement",
+            choices=("none", "output", "bottleneck"),
+            default="none",
+            type=str,
+            help="Where to apply coil attention in the sensitivity model",
+        )
         parser.add_argument(
             "--coil_attention",
             default=False,
             action="store_true",
-            help="Whether to use coil attention in the sensitivity model",
+            help="Deprecated alias for --coil_attention_placement output",
         )
 
         return parser

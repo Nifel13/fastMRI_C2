@@ -158,14 +158,13 @@ class SensitivityModel(nn.Module):
         """
         super().__init__()
         self.mask_center = mask_center
-        self.coil_attn = CoilAttention() if coil_attention else None
         self.norm_unet = NormUnet(
-            chans,
-            num_pools,
-            in_chans=in_chans,
-            out_chans=out_chans,
-            drop_prob=drop_prob,
+            chans, num_pools, in_chans=in_chans, out_chans=out_chans, drop_prob=drop_prob,
         )
+        self.coil_attn = None
+        if coil_attention:
+            with torch.random.fork_rng(devices=[]):     # keeps the baseline's init stream identical
+                self.coil_attn = CoilAttention()
 
     def chans_to_batch_dim(self, x: torch.Tensor) -> Tuple[torch.Tensor, int]:
         b, c, h, w, comp = x.shape

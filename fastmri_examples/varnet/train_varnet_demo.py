@@ -208,6 +208,15 @@ def build_args():
             mode="min",
         )
     ]
+    
+    if args.coil_attention:
+        from fastmri.attention_viz import CoilAttentionLogger
+        args.callbacks.append(CoilAttentionLogger(
+            data_dir=pathlib.Path(args.data_path) / "multicoil_val",
+            mask_type=args.mask_type,
+            center_fractions=args.center_fractions,
+            accelerations=args.accelerations,
+        ))
 
     # set default checkpoint if one exists in our checkpoint directory
     if args.resume_from_checkpoint is None:
